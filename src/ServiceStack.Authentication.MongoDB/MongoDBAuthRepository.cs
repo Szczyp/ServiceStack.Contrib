@@ -12,122 +12,135 @@ using MongoDB.Driver.Builders;
 
 namespace ServiceStack.ServiceInterface.Auth
 {
-	public class MongoDBAuthRepository : IUserAuthRepository, IClearable
-	{
-		// http://www.mongodb.org/display/DOCS/How+to+Make+an+Auto+Incrementing+Field
-		class Counters
+  public class MongoDBAuthRepository : IUserAuthRepository, IClearable
+  {
+    // http://www.mongodb.org/display/DOCS/How+to+Make+an+Auto+Incrementing+Field
+    class Counters
+    {
+      public int Id { get; set; }
+      public int UserAuthCounter { get; set; }
+      public int UserOAuthProviderCounter { get; set; }
+    }
+
+    //http://stackoverflow.com/questions/3588623/c-sharp-regex-for-a-username-with-a-few-restrictions
+    public Regex ValidUserNameRegEx = new Regex(@"^(?=.{3,15}$)([A-Za-z0-9][._-]?)*$", RegexOptions.Compiled);
+
+    private readonly MongoDatabase mongoDatabase;
+
+    // UserAuth collection name
+    private static string UserAuth_Col
+    {
+      get
+      {
+        return typeof(UserAuth).Name;
+      }
+    }
+    // UserOAuthProvider collection name
+    private static string UserOAuthProvider_Col
+    {
+      get
+      {
+        return typeof(UserOAuthProvider).Name;
+      }
+    }
+    // Counters collection name
+    private static string Counters_Col
+    {
+      get
+      {
+        return typeof(Counters).Name;
+      }
+    }
+
+    public MongoDBAuthRepository(MongoDatabase mongoDatabase, bool createMissingCollections)
+    {
+      this.mongoDatabase = mongoDatabase;
+
+      if (createMissingCollections)
+      {
+        CreateMissingCollections();
+      }
+
+      if (!CollectionsExists())
+      {
+        throw new InvalidOperationException("One of the collections needed by MongoDBAuthRepository is missing." +
+                          "You can call MongoDBAuthRepository constructor with the parameter CreateMissingCollections set to 'true'  " +
+                          "to create the needed collections.");
+      }
+    }
+    public bool CollectionsExists()
+    {
+      return (mongoDatabase.CollectionExists(UserAuth_Col))
+          && (mongoDatabase.CollectionExists(UserOAuthProvider_Col))
+          && (mongoDatabase.CollectionExists(Counters_Col));
+
+    }
+
+    public void CreateMissingCollections()
+    {
+      if (!mongoDatabase.CollectionExists(UserAuth_Col))
+        mongoDatabase.CreateCollection(UserAuth_Col);
+
+      if (!mongoDatabase.CollectionExists(UserOAuthProvider_Col))
+        mongoDatabase.CreateCollection(UserOAuthProvider_Col);
+
+      if (!mongoDatabase.CollectionExists(Counters_Col))
+      {
+        mongoDatabase.CreateCollection(Counters_Col);
+
+        var CountersCollection = mongoDatabase.GetCollection<Counters>(Counters_Col);
+        Counters counters = new Counters();
+        CountersCollection.Save(counters);
+      }
+    }
+
+    public void DropAndReCreateCollections()
+    {
+      if (mongoDatabase.CollectionExists(UserAuth_Col))
+        mongoDatabase.DropCollection(UserAuth_Col);
+
+      if (mongoDatabase.CollectionExists(UserOAuthProvider_Col))
+        mongoDatabase.DropCollection(UserOAuthProvider_Col);
+
+      if (mongoDatabase.CollectionExists(Counters_Col))
+        mongoDatabase.DropCollection(Counters_Col);
+
+      CreateMissingCollections();
+    }
+
+    private void ValidatePassword(string password)
+    {
+      password.ThrowIfNullOrEmpty("password");
+    }
+
+    private void ValidateNewUser(UserAuth newUser)
+    {
+      newUser.ThrowIfNull("newUser");
+
+      if (newUser.UserName.IsNullOrEmpty() && newUser.Email.IsNullOrEmpty())
+        throw new ArgumentNullException("UserName or Email is required");
+
+      if (!newUser.UserName.IsNullOrEmpty())
+      {
+        if (!ValidUserNameRegEx.IsMatch(newUser.UserName))
+          throw new ArgumentException("UserName contains invalid characters", "UserName");
+      }
+    }
+
+    private void ValidateNewUserAndPassword(UserAuth newUser, string password)
+    {
+      ValidateNewUser(newUser);
+      ValidatePassword(password);
+    }
+
+    private string UserNameOrEmail(UserAuth user)
+    {
+      return user.UserName.IsNullOrEmpty() ? user.Email : user.UserName;
+    }
+
+    public UserAuth CreateUserAuth(UserAuth newUser, string password)
 		{
-			public int Id { get; set; }
-			public int UserAuthCounter { get; set; }
-			public int UserOAuthProviderCounter { get; set; }
-		}
-
-		//http://stackoverflow.com/questions/3588623/c-sharp-regex-for-a-username-with-a-few-restrictions
-		public Regex ValidUserNameRegEx = new Regex(@"^(?=.{3,15}$)([A-Za-z0-9][._-]?)*$", RegexOptions.Compiled);
-
-		private readonly MongoDatabase mongoDatabase;
-
-		// UserAuth collection name
-		private static string UserAuth_Col
-		{
-			get
-			{
-				return typeof(UserAuth).Name;
-			}
-		}
-		// UserOAuthProvider collection name
-		private static string UserOAuthProvider_Col
-		{
-			get
-			{
-				return typeof(UserOAuthProvider).Name;
-			}
-		}
-		// Counters collection name
-		private static string Counters_Col
-		{
-			get
-			{
-				return typeof(Counters).Name;
-			}
-		}
-
-		public MongoDBAuthRepository(MongoDatabase mongoDatabase, bool createMissingCollections)
-		{
-			this.mongoDatabase = mongoDatabase;
-
-			if (createMissingCollections)
-			{
-				CreateMissingCollections();
-			}
-
-			if (!CollectionsExists())
-			{
-				throw new InvalidOperationException("One of the collections needed by MongoDBAuthRepository is missing." +
-													"You can call MongoDBAuthRepository constructor with the parameter CreateMissingCollections set to 'true'  " +
-													"to create the needed collections.");
-			}
-		}
-		public bool CollectionsExists()
-		{
-				return (mongoDatabase.CollectionExists(UserAuth_Col))
-						&& (mongoDatabase.CollectionExists(UserOAuthProvider_Col))
-						&& (mongoDatabase.CollectionExists(Counters_Col));
-
-		}
-
-		public void CreateMissingCollections()
-		{
-			if (!mongoDatabase.CollectionExists(UserAuth_Col))
-				mongoDatabase.CreateCollection(UserAuth_Col);
-
-			if (!mongoDatabase.CollectionExists(UserOAuthProvider_Col))
-				mongoDatabase.CreateCollection(UserOAuthProvider_Col);
-
-			if (!mongoDatabase.CollectionExists(Counters_Col))
-			{
-				mongoDatabase.CreateCollection(Counters_Col);
-
-				var CountersCollection = mongoDatabase.GetCollection<Counters>(Counters_Col);
-				Counters counters = new Counters();
-				CountersCollection.Save(counters);
-			}
-		}
-
-		public void DropAndReCreateCollections()
-		{
-			if (mongoDatabase.CollectionExists(UserAuth_Col))
-				mongoDatabase.DropCollection(UserAuth_Col);
-
-			if (mongoDatabase.CollectionExists(UserOAuthProvider_Col))
-				mongoDatabase.DropCollection(UserOAuthProvider_Col);
-
-			if (mongoDatabase.CollectionExists(Counters_Col))
-				mongoDatabase.DropCollection(Counters_Col);
-
-			CreateMissingCollections();
-		}
-
-		private void ValidateNewUser(UserAuth newUser, string password)
-		{
-			newUser.ThrowIfNull("newUser");
-			password.ThrowIfNullOrEmpty("password");
-
-			if (newUser.UserName.IsNullOrEmpty() && newUser.Email.IsNullOrEmpty())
-				throw new ArgumentNullException("UserName or Email is required");
-
-			if (!newUser.UserName.IsNullOrEmpty())
-			{
-				if (!ValidUserNameRegEx.IsMatch(newUser.UserName))
-					throw new ArgumentException("UserName contains invalid characters", "UserName");
-			}
-		}
-
-
-
-		public UserAuth CreateUserAuth(UserAuth newUser, string password)
-		{
-			ValidateNewUser(newUser, password);
+			ValidateNewUserAndPassword(newUser, password);
 
 			AssertNoExistingUser(mongoDatabase, newUser);
 
@@ -136,7 +149,7 @@ namespace ServiceStack.ServiceInterface.Auth
 			string hash;
 			saltedHash.GetHashAndSaltString(password, out hash, out salt);
 			var digestHelper = new DigestAuthFunctions();
-			newUser.DigestHA1Hash = digestHelper.CreateHa1(newUser.UserName, DigestAuthProvider.Realm, password);
+			newUser.DigestHA1Hash = digestHelper.CreateHa1(UserNameOrEmail(newUser), DigestAuthProvider.Realm, password);
 			newUser.PasswordHash = hash;
 			newUser.Salt = salt;
 			newUser.CreatedDate = DateTime.UtcNow;
@@ -194,24 +207,29 @@ namespace ServiceStack.ServiceInterface.Auth
 
 		public UserAuth UpdateUserAuth(UserAuth existingUser, UserAuth newUser, string password)
 		{
-			ValidateNewUser(newUser, password);
+			ValidateNewUser(newUser);
 
 			AssertNoExistingUser(mongoDatabase, newUser, existingUser);
 
 			var hash = existingUser.PasswordHash;
 			var salt = existingUser.Salt;
-			if (password != null)
-			{
-				var saltedHash = new SaltedHash();
-				saltedHash.GetHashAndSaltString(password, out hash, out salt);
-			}
-			// If either one changes the digest hash has to be recalculated
-			var digestHash = existingUser.DigestHA1Hash;
-			if (password != null || existingUser.UserName != newUser.UserName)
-			{
-				var digestHelper = new DigestAuthFunctions();
-				digestHash = digestHelper.CreateHa1(newUser.UserName, DigestAuthProvider.Realm, password);
-			}
+      var digestHash = existingUser.DigestHA1Hash;
+
+      if (password != null)
+      {
+        ValidatePassword(password);
+
+        var saltedHash = new SaltedHash();
+        saltedHash.GetHashAndSaltString(password, out hash, out salt);
+
+        // If either one changes the digest hash has to be recalculated
+        if (UserNameOrEmail(existingUser) != UserNameOrEmail(newUser))
+        {
+          var digestHelper = new DigestAuthFunctions();
+          digestHash = digestHelper.CreateHa1(newUser.UserName, DigestAuthProvider.Realm, password);
+        }
+      }
+
 			newUser.Id = existingUser.Id;
 			newUser.PasswordHash = hash;
 			newUser.Salt = salt;
